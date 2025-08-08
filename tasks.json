@@ -1,0 +1,37 @@
+[
+    {
+        "id": "3cc483aa-c2c9-4b6e-baa1-1ef420269c0f",
+        "title": "HelloWorld",
+        "description": "Trial task",
+        "due_date": "2025-08-05",
+        "completed": true,
+        "tags": [
+            "trial",
+            "test"
+        ],
+        "priority": "Medium"
+    },
+    {
+        "id": "1ffd45ab-df6f-4b9b-90e1-49e001a94dd9",
+        "title": "Testingcheats",
+        "description": "Enabled true",
+        "due_date": "2025-08-08",
+        "completed": true,
+        "tags": [
+            "trial",
+            "programming"
+        ],
+        "priority": "High"
+    },
+    {
+        "id": "ca15c606-6795-4f59-ae63-1fc003e1d7d5",
+        "title": "Spice",
+        "description": "testing id with creation",
+        "due_date": "2025-08-13",
+        "completed": false,
+        "tags": [
+            "programming"
+        ],
+        "priority": "High"
+    }
+]

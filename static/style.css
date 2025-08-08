@@ -1,0 +1,28 @@
+
+.flashes {
+    padding: 0;
+}
+
+.flashes li {
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    color: white;
+}
+
+.success {
+    background-color: #4CAF50;
+}
+
+.info {
+    background-color: #2196F3;
+}
+
+.warning {
+    background-color: #f44336;
+}
+
+.overdue {
+    background-color: #ffe6e6;
+    border-left: 5px solid red;
+}
