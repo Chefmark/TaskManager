@@ -1,16 +1,23 @@
-from flask import Flask,flash, render_template, request, redirect, url_for
 import json
 import os
 from datetime import datetime
 from key import flashkey as fkey
 import uuid
 import logging
-from models import User, users
+from flask import Flask,flash, render_template, request, redirect, url_for
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from flask_migrate import Migrate
+from models import User, Task, users
 from werkzeug.security import check_password_hash
+from extensions import db
 
 app = Flask(__name__)
 app.secret_key = fkey
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///taskmanager.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+migrate = Migrate(app, db)
+
 logging.basicConfig(
     filename='error.log',
     level =logging.ERROR,
