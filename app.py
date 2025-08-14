@@ -4,18 +4,28 @@ import os
 from datetime import datetime
 from key import flashkey as fkey
 import uuid
-
+import logging
 
 app = Flask(__name__)
 app.secret_key = fkey
+logging.basicConfig(
+    filename='error.log',
+    level =logging.ERROR,
+    format='%(asctime)s:%(levelname)s:%(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
-# Load and save tasks from JSON
+# Global definitions
 def load_tasks(): 
     if os.path.exists("tasks.json"):
         try:
             with open("tasks.json", "r") as f:
                 return json.load(f)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            log_error(f"JSON decode error: {e}")
+            return []
+        except Exception as e:
+            log_error(f"Unexpected error loading tasks: {e}")
             return []
     return []
 
@@ -34,6 +44,16 @@ def is_overdue(task):
         except ValueError:
             return False
     return False
+
+def is_valid_date(date_str):
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+def log_error(message):
+    logging.error(f"{datetime.now()}: {message}")
 
 @app.route("/")
 def index():
@@ -68,25 +88,43 @@ def index():
 @app.route("/add", methods=["GET", "POST"])
 def add_task():
     if request.method == "POST":
-        title = request.form["title"]
-        description = request.form["description"]
-        due_date = request.form["due_date"]
-        tags = request.form["tags"].split(",") if request.form["tags"] else []
-        priority = request.form["priority"]
-        task = {
-            "id": str(uuid.uuid4()),
-            "title": title,
-            "description": description,
-            "due_date": due_date,
-            "completed": False,
-            "tags": tags,
-            "priority": priority
-        }
-        tasks = load_tasks()
-        tasks.append(task)
-        save_tasks(tasks)
-        flash("Task added successfully!", "success")
-        return redirect(url_for("index"))
+        try:
+            title = request.form["title"]
+            description = request.form["description"]
+            due_date = request.form["due_date"]
+            tags = request.form["tags"].split(",") if request.form["tags"] else []
+            priority = request.form["priority"]
+            if not title:
+                flash("Title is required!", "error")
+                return redirect(url_for("add_task"))
+            if due_date:
+                try:
+                    datetime.strptime(due_date, "%Y-%m-%d")
+                except ValueError:
+                    flash("Invalid date format. Use YYYY-MM-DD.", "error")
+                    return redirect(url_for("add_task"))
+            if priority not in ["High", "Medium", "Low"]:
+                flash("Invalid priority. Choose High, Medium, or Low.", "error")
+                return redirect(url_for("add_task"))
+
+            task = {
+                "id": str(uuid.uuid4()),
+                "title": title,
+                "description": description,
+                "due_date": due_date,
+                "completed": False,
+                "tags": tags,
+                "priority": priority
+            }
+            tasks = load_tasks()
+            tasks.append(task)
+            save_tasks(tasks)
+            flash("Task added successfully!", "success")
+            return redirect(url_for("index"))
+        except Exception as e:
+            log_error(f"Error adding task: {e}")
+            flash("An error occurred while adding the task.", "error")
+            return redirect(url_for("add_task"))
     return render_template("add_task.html")
 
 @app.route("/edit/<task_id>", methods =["GET", "POST"])
@@ -94,18 +132,37 @@ def edit_task(task_id):
     tasks = load_tasks()
     task = next((t for t in tasks if t["id"]==task_id), None)
     if not task:
+        log_error(f"Task with ID {task_id} not found for editing.")
+        flash("Task not found.", "error")
         return "Task not found", 404
 
     if request.method == "POST":
-        task["title"] = request.form["title"]
-        task["description"] = request.form["description"]
-        task["due_date"] = request.form["due_date"]
-        tags_input = request.form["tags"]
-        task["tags"] = [tag.strip() for tag in tags_input.split(",")] if tags_input else []
-        task["priority"] = request.form["priority"]
-        save_tasks(tasks)
-        flash("Task updated successfully!", "info")
-        return redirect(url_for("index"))
+        try:
+            task["title"] = request.form["title"]
+            task["description"] = request.form["description"]
+            task["due_date"] = request.form["due_date"]
+            tags_input = request.form["tags"]
+            task["tags"] = [tag.strip() for tag in tags_input.split(",")] if tags_input else []
+            task["priority"] = request.form["priority"]
+            if not task["title"]:
+                flash("Title is required!", "error")
+                return redirect(url_for("edit_task", task_id=task_id))
+            if task["due_date"]:
+                try:
+                    datetime.strptime(task["due_date"], "%Y-%m-%d")
+                except ValueError:
+                    flash("Invalid date format. Use YYYY-MM-DD.", "error")
+                    return redirect(url_for("edit_task", task_id=task_id))
+            if task["priority"] not in ["High", "Medium", "Low"]:
+                flash("Invalid priority. Choose High, Medium, or Low.", "error")
+                return redirect(url_for("edit_task", task_id=task_id))        
+            save_tasks(tasks)
+            flash("Task updated successfully!", "info")
+            return redirect(url_for("index"))
+        except Exception as e:
+            log_error(f"Error editing task: {e}")
+            flash("An error occurred while editing the task.", "error")
+            return redirect(url_for("edit_task", task_id=task_id))
     return render_template("edit_task.html", task=task)
 
 @app.route("/complete/<task_id>")
@@ -117,6 +174,7 @@ def complete_task(task_id):
         save_tasks(tasks)
         flash("Task marked as completed!", "success")
     else:
+        log_error(f"Task with ID {task_id} not found for completion.")
         flash("Task not found.", "warning")
     return redirect(url_for("index"))
 
@@ -129,6 +187,7 @@ def incomplete_task(task_id):
         save_tasks(tasks)
         flash("Task marked as incompleted!", "info")
     else:
+        log_error(f"Task with ID {task_id} not found for incompletion.")
         flash("task not found.", "warning")
     return redirect(url_for("index"))
 
@@ -136,11 +195,12 @@ def incomplete_task(task_id):
 def delete_task(task_id):
     tasks = load_tasks()
     original_length = len(tasks)
-    tasks = [t for t in tasks if t["id]"] != task_id]
+    tasks = [t for t in tasks if t["id"] != task_id]
     if len(tasks) < original_length:
         save_tasks(tasks)
         flash("Task deleted successfully!", "warning")
     else:
+        log_error(f"Task with ID {task_id} not found for deletion.")
         flash("Task not found.", "warning")
     return redirect(url_for("index"))
 
