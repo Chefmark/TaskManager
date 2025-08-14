@@ -5,6 +5,9 @@ from datetime import datetime
 from key import flashkey as fkey
 import uuid
 import logging
+from models import User, users
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from werkzeug.security import check_password_hash
 
 app = Flask(__name__)
 app.secret_key = fkey
@@ -14,6 +17,11 @@ logging.basicConfig(
     format='%(asctime)s:%(levelname)s:%(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
+login_manager.login_message = "Please log in to access this page."
+login_manager.login_message_category = "info"
 
 # Global definitions
 def load_tasks(): 
@@ -55,7 +63,15 @@ def is_valid_date(date_str):
 def log_error(message):
     logging.error(f"{datetime.now()}: {message}")
 
+@login_manager.user_loader
+def load_user(user_id):
+    for user in users.values():
+        if str(user.id) == user_id:
+            return user
+    return None
+
 @app.route("/")
+@login_required
 def index():
     sort_by = request.args.get("sort", "default")
     filter_tag = request.args.get("tag")
@@ -86,6 +102,7 @@ def index():
     return render_template("index.html", tasks=tasks, filter_tag=filter_tag, search_query=search_query)
 
 @app.route("/add", methods=["GET", "POST"])
+@login_required
 def add_task():
     if request.method == "POST":
         try:
@@ -128,6 +145,7 @@ def add_task():
     return render_template("add_task.html")
 
 @app.route("/edit/<task_id>", methods =["GET", "POST"])
+@login_required
 def edit_task(task_id):
     tasks = load_tasks()
     task = next((t for t in tasks if t["id"]==task_id), None)
@@ -166,6 +184,7 @@ def edit_task(task_id):
     return render_template("edit_task.html", task=task)
 
 @app.route("/complete/<task_id>")
+@login_required
 def complete_task(task_id):
     tasks = load_tasks()
     task = next((t for t in tasks if t["id"]==task_id), None)
@@ -179,6 +198,7 @@ def complete_task(task_id):
     return redirect(url_for("index"))
 
 @app.route("/incomplete/<task_id>")
+@login_required
 def incomplete_task(task_id):
     tasks = load_tasks()
     task = next((t for t in tasks if t["id"]==task_id), None)
@@ -192,6 +212,7 @@ def incomplete_task(task_id):
     return redirect(url_for("index"))
 
 @app.route("/delete/<task_id>")
+@login_required
 def delete_task(task_id):
     tasks = load_tasks()
     original_length = len(tasks)
@@ -203,6 +224,32 @@ def delete_task(task_id):
         log_error(f"Task with ID {task_id} not found for deletion.")
         flash("Task not found.", "warning")
     return redirect(url_for("index"))
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+        user = users.get(username)
+        if user and check_password_hash(user.password_hash, password):
+            login_user(user)
+            flash("Login successful!", "success")
+            return redirect(url_for("index"))
+        else:
+            flash("Invalid username or password.", "error")
+    return render_template("login.html")
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    return render_template("dashboard.html")
+
+@app.route("/logout")
+def logout():
+    logout_user()
+    flash("You have been logged out.", "info")
+    return redirect(url_for("login"))
+
 
 if __name__ == "__main__":
     app.run(debug=True)
