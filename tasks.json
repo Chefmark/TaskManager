@@ -1,1 +1,14 @@
-[]
+[
+    {
+        "id": "b2ddf481-4839-4774-994c-4f8c8ffb1a11",
+        "title": "TaskManager",
+        "description": "keep improving the app",
+        "due_date": "2025-08-28",
+        "completed": false,
+        "tags": [
+            "python learning",
+            " testing"
+        ],
+        "priority": "Medium"
+    }
+]

@@ -1,15 +1,19 @@
 import json
 import os
 from datetime import datetime
-from key import flashkey as fkey
+from key import flashkey as fkey, admin_key as akey
 import uuid
 import logging
-from flask import Flask,flash, render_template, request, redirect, url_for
+from flask import Blueprint,Flask,flash, render_template, request, redirect, url_for
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_migrate import Migrate
-from models import User, Task, users
+from models import User, Task
 from werkzeug.security import check_password_hash
 from extensions import db
+from utils import log_error, is_valid_date, is_overdue
+from routes.main import main_bp
+from routes.auth import auth_bp 
+from routes.admin import admin_bp
 
 app = Flask(__name__)
 app.secret_key = fkey
@@ -17,6 +21,10 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///taskmanager.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 migrate = Migrate(app, db)
+
+app.register_blueprint(main_bp)
+app.register_blueprint(auth_bp)
+app.register_blueprint(admin_bp)
 
 logging.basicConfig(
     filename='error.log',
@@ -26,237 +34,31 @@ logging.basicConfig(
 )
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = "login"
+login_manager.login_view = "auth.login"
 login_manager.login_message = "Please log in to access this page."
 login_manager.login_message_category = "info"
 
-# Global definitions
-def load_tasks(): 
-    if os.path.exists("tasks.json"):
-        try:
-            with open("tasks.json", "r") as f:
-                return json.load(f)
-        except json.JSONDecodeError as e:
-            log_error(f"JSON decode error: {e}")
-            return []
-        except Exception as e:
-            log_error(f"Unexpected error loading tasks: {e}")
-            return []
-    return []
+def create_admin_user():
+    admin_username = "admin"
+    admin_password = akey
 
-def save_tasks(tasks):
-    with open("tasks.json", "w") as f:
-        json.dump(tasks, f, indent=4)
+    existing_admin = User.query.filter_by(username=admin_username).first()
+    if not existing_admin:
+        admin_user = User(username=admin_username, is_admin=True)
+        admin_user.set_password(admin_password)
+        db.session.add(admin_user)
+        db.session.commit()
+        print(f"Admin user created with username: {admin_username} and password.")
+    else:
+        print("Admin user already exists.")    
 
-def is_overdue(task):
-    if task.get("completed"):
-        return False
-    due_date_str = task.get("due_date")
-    if due_date_str:
-        try:
-            due_date = datetime.strptime(due_date_str, "%Y-%m-%d")
-            return datetime.now() > due_date
-        except ValueError:
-            return False
-    return False
-
-def is_valid_date(date_str):
-    try:
-        datetime.strptime(date_str, "%Y-%m-%d")
-        return True
-    except ValueError:
-        return False
-
-def log_error(message):
-    logging.error(f"{datetime.now()}: {message}")
 
 @login_manager.user_loader
 def load_user(user_id):
-    for user in users.values():
-        if str(user.id) == user_id:
-            return user
-    return None
-
-@app.route("/")
-@login_required
-def index():
-    sort_by = request.args.get("sort", "default")
-    filter_tag = request.args.get("tag")
-    search_query = request.args.get("search", "").lower()
-    tasks = load_tasks()
-
-    if filter_tag:
-        tasks = [task for task in tasks if filter_tag in task.get("tags",[])]
-
-    if search_query:
-        tasks = [
-            task for task in tasks
-            if search_query in task.get("title", "").lower() or search_query in task.get("description", "").lower()
-        ]
-    if sort_by == "due":
-        tasks.sort(key=lambda x: x.get("due_date") or "")
-    elif sort_by == "title":
-        tasks.sort(key=lambda x: x.get("title","").lower())
-    elif sort_by == "status":
-        tasks.sort(key=lambda x: x.get("completed", False))
-    elif sort_by == "priority": 
-        priority_order = {"High": 0, "Medium":1, "Low":2}
-        tasks.sort(key=lambda x: priority_order.get(x.get("priority", "Medium")))
-    
-    for task in tasks:
-        task["is_overdue"] = is_overdue(task)
-    
-    return render_template("index.html", tasks=tasks, filter_tag=filter_tag, search_query=search_query)
-
-@app.route("/add", methods=["GET", "POST"])
-@login_required
-def add_task():
-    if request.method == "POST":
-        try:
-            title = request.form["title"]
-            description = request.form["description"]
-            due_date = request.form["due_date"]
-            tags = request.form["tags"].split(",") if request.form["tags"] else []
-            priority = request.form["priority"]
-            if not title:
-                flash("Title is required!", "error")
-                return redirect(url_for("add_task"))
-            if due_date:
-                try:
-                    datetime.strptime(due_date, "%Y-%m-%d")
-                except ValueError:
-                    flash("Invalid date format. Use YYYY-MM-DD.", "error")
-                    return redirect(url_for("add_task"))
-            if priority not in ["High", "Medium", "Low"]:
-                flash("Invalid priority. Choose High, Medium, or Low.", "error")
-                return redirect(url_for("add_task"))
-
-            task = {
-                "id": str(uuid.uuid4()),
-                "title": title,
-                "description": description,
-                "due_date": due_date,
-                "completed": False,
-                "tags": tags,
-                "priority": priority
-            }
-            tasks = load_tasks()
-            tasks.append(task)
-            save_tasks(tasks)
-            flash("Task added successfully!", "success")
-            return redirect(url_for("index"))
-        except Exception as e:
-            log_error(f"Error adding task: {e}")
-            flash("An error occurred while adding the task.", "error")
-            return redirect(url_for("add_task"))
-    return render_template("add_task.html")
-
-@app.route("/edit/<task_id>", methods =["GET", "POST"])
-@login_required
-def edit_task(task_id):
-    tasks = load_tasks()
-    task = next((t for t in tasks if t["id"]==task_id), None)
-    if not task:
-        log_error(f"Task with ID {task_id} not found for editing.")
-        flash("Task not found.", "error")
-        return "Task not found", 404
-
-    if request.method == "POST":
-        try:
-            task["title"] = request.form["title"]
-            task["description"] = request.form["description"]
-            task["due_date"] = request.form["due_date"]
-            tags_input = request.form["tags"]
-            task["tags"] = [tag.strip() for tag in tags_input.split(",")] if tags_input else []
-            task["priority"] = request.form["priority"]
-            if not task["title"]:
-                flash("Title is required!", "error")
-                return redirect(url_for("edit_task", task_id=task_id))
-            if task["due_date"]:
-                try:
-                    datetime.strptime(task["due_date"], "%Y-%m-%d")
-                except ValueError:
-                    flash("Invalid date format. Use YYYY-MM-DD.", "error")
-                    return redirect(url_for("edit_task", task_id=task_id))
-            if task["priority"] not in ["High", "Medium", "Low"]:
-                flash("Invalid priority. Choose High, Medium, or Low.", "error")
-                return redirect(url_for("edit_task", task_id=task_id))        
-            save_tasks(tasks)
-            flash("Task updated successfully!", "info")
-            return redirect(url_for("index"))
-        except Exception as e:
-            log_error(f"Error editing task: {e}")
-            flash("An error occurred while editing the task.", "error")
-            return redirect(url_for("edit_task", task_id=task_id))
-    return render_template("edit_task.html", task=task)
-
-@app.route("/complete/<task_id>")
-@login_required
-def complete_task(task_id):
-    tasks = load_tasks()
-    task = next((t for t in tasks if t["id"]==task_id), None)
-    if task:   
-        task["completed"] = True
-        save_tasks(tasks)
-        flash("Task marked as completed!", "success")
-    else:
-        log_error(f"Task with ID {task_id} not found for completion.")
-        flash("Task not found.", "warning")
-    return redirect(url_for("index"))
-
-@app.route("/incomplete/<task_id>")
-@login_required
-def incomplete_task(task_id):
-    tasks = load_tasks()
-    task = next((t for t in tasks if t["id"]==task_id), None)
-    if task:
-        task["completed"] = False
-        save_tasks(tasks)
-        flash("Task marked as incompleted!", "info")
-    else:
-        log_error(f"Task with ID {task_id} not found for incompletion.")
-        flash("task not found.", "warning")
-    return redirect(url_for("index"))
-
-@app.route("/delete/<task_id>")
-@login_required
-def delete_task(task_id):
-    tasks = load_tasks()
-    original_length = len(tasks)
-    tasks = [t for t in tasks if t["id"] != task_id]
-    if len(tasks) < original_length:
-        save_tasks(tasks)
-        flash("Task deleted successfully!", "warning")
-    else:
-        log_error(f"Task with ID {task_id} not found for deletion.")
-        flash("Task not found.", "warning")
-    return redirect(url_for("index"))
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-        user = users.get(username)
-        if user and check_password_hash(user.password_hash, password):
-            login_user(user)
-            flash("Login successful!", "success")
-            return redirect(url_for("index"))
-        else:
-            flash("Invalid username or password.", "error")
-    return render_template("login.html")
-
-@app.route("/dashboard")
-@login_required
-def dashboard():
-    return render_template("dashboard.html")
-
-@app.route("/logout")
-def logout():
-    logout_user()
-    flash("You have been logged out.", "info")
-    return redirect(url_for("login"))
+    return User.query.get(int(user_id))
 
 
 if __name__ == "__main__":
+    with app.app_context():
+        create_admin_user()
     app.run(debug=True)

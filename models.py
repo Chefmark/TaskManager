@@ -7,12 +7,16 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password_hash = db.Column(db.String(150), nullable=False)
-
+    is_admin = db.Column(db.Boolean, default=False)
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+    
+    #use with 'if current_user.is_admin_user():'
+    def is_admin_user(self):
+        return self.is_admin
 
 class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -22,9 +26,6 @@ class Task(db.Model):
     completed = db.Column(db.Boolean, default=False)
     priority = db.Column(db.String(10))
     tags=db.Column(db.Text)
-    user = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-users = {
-    "marekm": User(id=1, username="marekm", password_hash=generate_password_hash("password123")),
-}
-    
+    user = db.relationship("User", backref="tasks")
